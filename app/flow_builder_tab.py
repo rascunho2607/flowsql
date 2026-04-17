@@ -194,6 +194,20 @@ class FlowBuilderTab(QWidget):
         self._canvas.set_theme(theme)
         self._props.set_theme(theme)
 
+    def set_engine(self, engine, conn_name: str = "", db_name: str = ""):
+        """Update execution engine/context for this flow tab."""
+        self._engine = engine
+        self._conn_name = conn_name
+        self._db_name = db_name
+        if engine is not None:
+            try:
+                from core.schema_inspector import SchemaInspector
+                self._inspector = SchemaInspector(engine)
+                self._canvas.set_inspector(self._inspector)
+                self._explorer.set_connection(conn_name, self._inspector)
+            except Exception:
+                pass
+
     # ── Autosave ───────────────────────────────────────────────────────────
     def _autosave_path(self) -> str:
         directory = os.path.expanduser("~/.flowsql/autosave")
@@ -235,9 +249,9 @@ class FlowBuilderTab(QWidget):
         if self._engine is None:
             return
         try:
-            # Always use the full graph — not just selected nodes — so that
-            # TableNode / JoinNode upstream are always included in the SQL.
-            sql = self._canvas.generate_sql(self._dialect)
+            # Generate SQL only from the sub-graph feeding this node so that
+            # unconnected parts of the canvas do not pollute the result.
+            sql = self._canvas.generate_sql_for_node(node, self._dialect)
             if not sql or sql.startswith("--"):
                 if hasattr(node, "set_result"):
                     node.set_result(
@@ -245,7 +259,6 @@ class FlowBuilderTab(QWidget):
                         [{"Erro": "Não foi possível gerar SQL. Verifique as conexões do fluxo."}],
                     )
                 return
-            # Reject if no FROM clause (e.g. no TableNode connected)
             if "FROM " not in sql.upper():
                 if hasattr(node, "set_result"):
                     node.set_result(
@@ -263,17 +276,34 @@ class FlowBuilderTab(QWidget):
         if qf and qf != "nenhum":
             sql = _apply_quick_filter(sql, qf)
 
-        from core.query_executor import QueryExecutor
-        from PyQt5.QtCore import QThread
+        from PyQt5.QtCore import QThread, QObject, pyqtSlot as _pyqtSlot
+
+        # ── QObject receiver that lives in the main thread ───────────────
+        # Connecting a lambda to a thread signal uses DirectConnection (runs
+        # in the worker thread).  Using a QObject with thread affinity in the
+        # main thread forces PyQt5 to use QueuedConnection automatically, so
+        # set_result / update() are always called from the GUI thread.
+        class _Receiver(QObject):
+            def __init__(self, target_node, parent=None):
+                super().__init__(parent)
+                self._node = target_node
+
+            @_pyqtSlot(list, list)
+            def on_done(self, cols, rows):
+                self._node.set_result(cols, rows)
+
+            @_pyqtSlot(str)
+            def on_error(self, msg):
+                self._node.set_result(["Erro"], [{"Erro": msg}])
 
         class _RunThread(QThread):
-            done = pyqtSignal(list, list)   # cols, rows
+            done  = pyqtSignal(list, list)
             error = pyqtSignal(str)
 
             def __init__(self, engine, sql, parent=None):
                 super().__init__(parent)
                 self._engine = engine
-                self._sql = sql
+                self._sql    = sql
 
             def run(self):
                 try:
@@ -285,12 +315,22 @@ class FlowBuilderTab(QWidget):
                 except Exception as exc:
                     self.error.emit(str(exc))
 
+        recv   = _Receiver(node, self)   # parent=self → main thread
         thread = _RunThread(self._engine, sql, self)
-        thread.done.connect(lambda cols, rows: node.set_result(cols, rows))
-        thread.error.connect(lambda msg: node.set_result(["Erro"], [{"Erro": msg}]))
+        thread.done.connect(recv.on_done)
+        thread.error.connect(recv.on_error)
+        # Keep a reference so the GC does not collect the thread before it
+        # finishes (which would silently swallow the done/error signal).
+        if not hasattr(self, "_active_threads"):
+            self._active_threads = []
+        self._active_threads.append(thread)
         thread.start()
-        # Keep thread alive until finished
+        thread.finished.connect(recv.deleteLater)
         thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(
+            lambda: self._active_threads.remove(thread)
+            if thread in self._active_threads else None
+        )
 
     # ── Save / Load ───────────────────────────────────────────────────────
     def _save_flow(self):

@@ -7,9 +7,10 @@ on the canvas itself). Interactive editing happens in the Properties panel.
 """
 
 import uuid
+from enum import Enum
 from typing import Optional
 
-from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal, QObject
+from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal, QObject, QTimer
 from PyQt5.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetrics, QPainterPath,
 )
@@ -17,8 +18,65 @@ from PyQt5.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QStyleOptionGraphicsItem, QWidget,
     QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent,
     QGraphicsProxyWidget,
-    QComboBox, QLineEdit, QHBoxLayout, QApplication, QMenu,
+    QComboBox, QLineEdit, QTextEdit, QHBoxLayout, QApplication, QMenu,
 )
+
+# ── ThemeColors: typed constants for all palette entries ──────────────────────
+class ThemeColors(str, Enum):
+    """Strongly-typed keys for the _THEME palette.
+
+    Each member's value is the key used inside ``_THEME``.  This allows
+    IDE auto-complete and avoids bare string literals scattered across the
+    codebase.
+    """
+    BODY_BG         = "body_bg"
+    BODY_BORDER     = "body_border"
+    HEADER_BG       = "header_bg"
+    HEADER_FG       = "header_fg"
+    SEL_BORDER      = "sel_border"
+    SEL_HEADER      = "sel_header"
+    ICON_COLOR      = "icon_color"
+    LABEL_FG        = "label_fg"
+    VALUE_FG        = "value_fg"
+    TYPE_FG         = "type_fg"
+    PORT_BORDER     = "port_border"
+    PORT_FILL       = "port_fill"
+    PORT_CONN       = "port_conn"
+    CONN_LINE       = "conn_line"
+    FUNC_HEADER_BG  = "func_header_bg"
+    FUNC_HEADER_FG  = "func_header_fg"
+    PROC_HEADER_BG  = "proc_header_bg"
+    PROC_HEADER_FG  = "proc_header_fg"
+    UNION_HEADER_BG = "union_header_bg"
+    UNION_HEADER_FG = "union_header_fg"
+    UPDATE_HEADER_BG = "update_header_bg"
+    UPDATE_HEADER_FG = "update_header_fg"
+    DELETE_HEADER_BG = "delete_header_bg"
+    DELETE_HEADER_FG = "delete_header_fg"
+    # NoteNode
+    NOTE_HEADER_BG  = "note_header_bg"
+    NOTE_HEADER_FG  = "note_header_fg"
+    NOTE_BODY_BG    = "note_body_bg"
+    NOTE_BODY_FG    = "note_body_fg"
+    # GroupNode
+    GROUP_HEADER_BG = "group_header_bg"
+    GROUP_HEADER_FG = "group_header_fg"
+    GROUP_BODY_BG   = "group_body_bg"
+    GROUP_BORDER    = "group_border"
+    # High-contrast overrides (applied when theme == "high-contrast")
+    HC_BODY_BG      = "hc_body_bg"
+    HC_BODY_BORDER  = "hc_body_border"
+    HC_HEADER_FG    = "hc_header_fg"
+
+    def __str__(self) -> str:   # allow direct use as dict key
+        return self.value
+
+
+def tc(key: "ThemeColors | str") -> str:
+    """Resolve a ThemeColors member (or plain string) to the ``_THEME`` value."""
+    k = str(key)
+    return _THEME.get(k, "#ff00ff")   # magenta fallback makes missing keys obvious
+
 
 # ── Colour palettes (updated by theme_manager at runtime) ─────────────────────
 _THEME: dict = {
@@ -51,6 +109,20 @@ _THEME: dict = {
     # DeleteNode header
     "delete_header_bg": "#450a0a",
     "delete_header_fg": "#fca5a5",
+    # NoteNode
+    "note_header_bg": "#78716c",
+    "note_header_fg": "#fef3c7",
+    "note_body_bg":   "#fef3c7",
+    "note_body_fg":   "#292524",
+    # GroupNode
+    "group_header_bg": "#1e293b",
+    "group_header_fg": "#94a3b8",
+    "group_body_bg":   "#1e293b",
+    "group_border":    "#334155",
+    # High-contrast (only populated on "high-contrast" theme)
+    "hc_body_bg":     "",
+    "hc_body_border": "",
+    "hc_header_fg":   "",
 }
 
 
@@ -83,8 +155,60 @@ def apply_node_theme(theme: str):
             "update_header_fg": "#fdba74",
             "delete_header_bg": "#450a0a",
             "delete_header_fg": "#fca5a5",
+            # NoteNode
+            "note_header_bg": "#78716c",
+            "note_header_fg": "#fef3c7",
+            "note_body_bg":   "#fef3c7",
+            "note_body_fg":   "#292524",
+            # GroupNode
+            "group_header_bg": "#1e293b",
+            "group_header_fg": "#94a3b8",
+            "group_body_bg":   "#1e293b",
+            "group_border":    "#334155",
+            # High-contrast
+            "hc_body_bg":     "",
+            "hc_body_border": "",
+            "hc_header_fg":   "",
         })
-    else:
+    elif theme == "high-contrast":
+        _THEME.update({
+            "body_bg":    "#000000",
+            "body_border": "#ffffff",
+            "header_bg":  "#000000",
+            "header_fg":  "#ffffff",
+            "sel_border": "#ffff00",
+            "sel_header": "#003366",
+            "icon_color": "#ffffff",
+            "label_fg":   "#ffffff",
+            "value_fg":   "#ffffff",
+            "type_fg":    "#aaaaaa",
+            "port_border": "#ffffff",
+            "port_fill":  "#000000",
+            "port_conn":  "#00ff00",
+            "conn_line":  "#ffffff",
+            "func_header_bg":  "#000000",
+            "func_header_fg":  "#00ff88",
+            "proc_header_bg":  "#000000",
+            "proc_header_fg":  "#aaaaff",
+            "union_header_bg": "#000000",
+            "union_header_fg": "#88bbff",
+            "update_header_bg": "#000000",
+            "update_header_fg": "#ffaa44",
+            "delete_header_bg": "#000000",
+            "delete_header_fg": "#ff4444",
+            "note_header_bg":  "#333300",
+            "note_header_fg":  "#ffff00",
+            "note_body_bg":    "#111100",
+            "note_body_fg":    "#ffff88",
+            "group_header_bg": "#001133",
+            "group_header_fg": "#88aaff",
+            "group_body_bg":   "#000011",
+            "group_border":    "#4488ff",
+            "hc_body_bg":      "#000000",
+            "hc_body_border":  "#ffffff",
+            "hc_header_fg":    "#ffffff",
+        })
+    else:  # light
         _THEME.update({
             "body_bg":    "#ffffff",
             "body_border": "#bbbbbb",
@@ -110,16 +234,31 @@ def apply_node_theme(theme: str):
             "update_header_fg": "#9a3412",
             "delete_header_bg": "#fef2f2",
             "delete_header_fg": "#991b1b",
+            # NoteNode
+            "note_header_bg": "#d6b47c",
+            "note_header_fg": "#292524",
+            "note_body_bg":   "#fef3c7",
+            "note_body_fg":   "#292524",
+            # GroupNode
+            "group_header_bg": "#e2e8f0",
+            "group_header_fg": "#334155",
+            "group_body_bg":   "#f8fafc",
+            "group_border":    "#94a3b8",
+            # High-contrast (empty in light mode)
+            "hc_body_bg":     "",
+            "hc_body_border": "",
+            "hc_header_fg":   "",
         })
 
 
 # ── Dimensions ────────────────────────────────────────────────────────────────
-NODE_WIDTH   = 220
-HEADER_H     = 28
-ROW_H        = 22
-PORT_R       = 5       # radius
-PORT_D       = PORT_R * 2
-PADDING      = 10
+NODE_WIDTH    = 220
+HEADER_H      = 28
+ROW_H         = 22
+PORT_R        = 5       # radius
+PORT_D        = PORT_R * 2
+PADDING       = 10
+SEARCH_BAR_H  = 24     # TableNode inline column-filter bar
 
 # ── Header fonts ─────────────────────────────────────────────────────────────
 _HEADER_FONT = QFont("Segoe UI", 9, QFont.Bold)
@@ -193,6 +332,9 @@ class BaseNode(QGraphicsObject):
         self.out_ports: list[Port] = []
 
         self._hover = False
+        self._hovered_port: Optional[Port] = None   # port under mouse cursor
+        self._drop_target_port: Optional[Port] = None  # highlighted while dragging
+        self._highlighted_ports: set[Port] = set()  # all compatible ports (canvas-managed)
         self._proxies: list[QGraphicsProxyWidget] = []   # inline editors
 
     # ── Inline proxy widget helpers ───────────────────────────────────────────
@@ -285,10 +427,13 @@ class BaseNode(QGraphicsObject):
         header_fg = _THEME[self._header_fg_key] if not selected else _THEME["header_fg"]
         painter.setPen(QColor(header_fg))
         painter.drawText(
-            QRectF(PADDING + 22, 0, NODE_WIDTH - PADDING * 2 - 22, HEADER_H),
+            QRectF(PADDING + 22, 0, NODE_WIDTH - PADDING * 2 - 22 - 16, HEADER_H),
             Qt.AlignVCenter | Qt.AlignLeft,
             self.label(),
         )
+
+        # ─ Validation badge ───────────────────────────────────────────────
+        self._draw_header_badge(painter)
 
         # ─ Body rows ──────────────────────────────────────────────────────
         y0 = HEADER_H + PADDING
@@ -320,6 +465,31 @@ class BaseNode(QGraphicsObject):
     def _paint_ports(self, painter: QPainter):
         for port in self.in_ports + self.out_ports:
             local_pos = self._port_local(port)
+
+            # ─ Compatible-port halo (canvas-managed, all droppable targets) ──
+            if port in self._highlighted_ports:
+                halo = QColor(_THEME["port_conn"])
+                halo.setAlphaF(0.5)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(halo)
+                painter.drawEllipse(local_pos, PORT_R + 6, PORT_R + 6)
+
+            # ─ Drop-target ring (bright green, drawn first) ───────────────
+            if port is self._drop_target_port:
+                ring = QColor("#22c55e")
+                ring.setAlphaF(0.9)
+                painter.setPen(QPen(ring, 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(local_pos, PORT_R + 5, PORT_R + 5)
+
+            # ─ Hover glow ─────────────────────────────────────────────────
+            if port is self._hovered_port:
+                glow = QColor(_THEME["port_conn"])
+                glow.setAlphaF(0.3)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(glow)
+                painter.drawEllipse(local_pos, PORT_R + 4, PORT_R + 4)
+
             fill = _THEME["port_conn"] if port.connected else _THEME["port_fill"]
             # Use distinct shape for context ports (diamond-ish via larger dot)
             painter.setPen(QPen(QColor(_THEME["port_border"]), 1))
@@ -375,10 +545,48 @@ class BaseNode(QGraphicsObject):
         self.update()
         super().hoverEnterEvent(event)
 
+    def hoverMoveEvent(self, event):
+        new_port = self.port_at(event.pos())
+        if new_port is not self._hovered_port:
+            self._hovered_port = new_port
+            self.update()
+        super().hoverMoveEvent(event)
+
     def hoverLeaveEvent(self, event):
         self._hover = False
-        self.update()
+        if self._hovered_port is not None:
+            self._hovered_port = None
+            self.update()
         super().hoverLeaveEvent(event)
+
+    # ── Validation ────────────────────────────────────────────────────────────
+    def validate(self) -> Optional[list[str]]:
+        """Return list of errors (empty = valid), or None if not implemented."""
+        return None
+
+    def validate_warnings(self) -> list[str]:
+        """Return list of non-blocking warnings."""
+        return []
+
+    def _badge_color(self) -> QColor:
+        """Determine badge color from validation state."""
+        errors = self.validate()
+        if errors is None:
+            return QColor("#9ca3af")   # gray  – not implemented
+        if errors:
+            return QColor("#ef4444")   # red   – blocking errors
+        if self.validate_warnings():
+            return QColor("#eab308")   # yellow – only warnings
+        return QColor("#22c55e")       # green  – all good
+
+    def _draw_header_badge(self, painter: QPainter, header_w: float = NODE_WIDTH):
+        """Draw 8 px validation-state badge at top-right of header."""
+        color = self._badge_color()
+        cx = header_w - PADDING - 4.0
+        cy = HEADER_H / 2.0
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(color)
+        painter.drawEllipse(QPointF(cx, cy), 4.0, 4.0)
 
     # ── Data helpers ──────────────────────────────────────────────────────────
     def set_data(self, key: str, value):
@@ -421,8 +629,9 @@ class TableNode(BaseNode):
         self._data = {"name": "", "alias": ""}
         self._columns: list[dict] = []         # {"name": str, "type": str, "pk": bool}
         self._selected_cols: list[str] = []    # names of selected columns
+        self._column_filter: str = ""          # live column-search text
 
-        # Context port at row 0 (always present)
+        # Context port — placed at header level via _port_local override
         _add_port(self, "out", 0, "out_ctx",
                   label="⬡ contexto", port_kind="context")
 
@@ -430,27 +639,238 @@ class TableNode(BaseNode):
     def label(self): return "TABLE"
 
     def rows(self):
-        # Body rendering is replaced entirely by port labels
+        return []   # paint() handles the column list directly
+
+    # ── Validation ────────────────────────────────────────────────────────────
+    def validate(self) -> list[str]:
+        if not self._data.get("name", "").strip():
+            return ["nome da tabela não definido"]
         return []
 
+    # ── Schema / port management ──────────────────────────────────────────────
     def set_schema_columns(self, columns: list[dict]):
         """Called when schema info is available. Rebuilds field ports."""
         self._columns = list(columns)
-        self._rebuild_field_ports()
+        self._rebuild_field_ports(self._column_filter)
 
-    def _rebuild_field_ports(self):
-        """Remove all field ports and rebuild from _columns."""
+    def _rebuild_field_ports(self, filter_text: str = ""):
+        """Remove all field ports and rebuild, applying *filter_text* as a
+        case-insensitive substring filter over column names."""
         self.prepareGeometryChange()
-        # Remove existing field ports (keep out_ctx at row 0)
         self.out_ports = [p for p in self.out_ports if p.port_id == "out_ctx"]
-        # Add one field port per column (row 1+)
-        for i, col in enumerate(self._columns):
+        ft = filter_text.lower().strip()
+        visible = [col for col in self._columns
+                   if not ft or ft in col.get("name", "").lower()]
+        for row_idx, col in enumerate(visible):
             col_name = col.get("name", "")
             col_type = col.get("type", "")
-            _add_field_port(self, "out", col_name, col_type, i + 1,
-                            pid=f"out_field_{i}")
+            # Stable port ID uses original column index for serialisation compat
+            orig_idx = self._columns.index(col)
+            _add_field_port(self, "out", col_name, col_type, row_idx,
+                            pid=f"out_field_{orig_idx}")
         self.update()
 
+    # ── Geometry ──────────────────────────────────────────────────────────────
+    def _body_height(self) -> float:
+        n_field = len([p for p in self.out_ports if p.port_id != "out_ctx"])
+        n = max(n_field, 1)
+        indicator = ROW_H if (self._column_filter and self._columns) else 0
+        return HEADER_H + SEARCH_BAR_H + PADDING + n * ROW_H + indicator + PADDING
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(0, 0, NODE_WIDTH, self._body_height())
+
+    # ── Port positions ────────────────────────────────────────────────────────
+    def _port_local(self, port: Port) -> QPointF:
+        if port.port_id == "out_ctx":
+            return QPointF(NODE_WIDTH, HEADER_H / 2)
+        # Field ports: 0-based row below the search bar
+        y = HEADER_H + SEARCH_BAR_H + PADDING + port.row * ROW_H + ROW_H / 2
+        return QPointF(NODE_WIDTH, y)
+
+    # ── Paint ─────────────────────────────────────────────────────────────────
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
+              widget: QWidget = None):
+        rect = self.boundingRect()
+        selected = self.isSelected()
+
+        # Shadow
+        shadow_path = QPainterPath()
+        shadow_path.addRoundedRect(rect.adjusted(3, 3, 3, 3), 4, 4)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 60))
+        painter.drawPath(shadow_path)
+
+        # Body
+        body_path = QPainterPath()
+        body_path.addRoundedRect(rect, 4, 4)
+        painter.setBrush(QColor(_THEME["body_bg"]))
+        border_color = _THEME["sel_border"] if selected else _THEME["body_border"]
+        painter.setPen(QPen(QColor(border_color), 2 if selected else 1))
+        painter.drawPath(body_path)
+
+        # Header background
+        header_path = QPainterPath()
+        header_path.addRoundedRect(QRectF(0, 0, NODE_WIDTH, HEADER_H), 4, 4)
+        header_path.addRect(QRectF(0, HEADER_H / 2, NODE_WIDTH, HEADER_H / 2))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(_THEME["sel_header"] if selected
+                                else _THEME[self._header_bg_key]))
+        painter.drawPath(header_path)
+
+        # Icon
+        painter.setFont(_ICON_FONT)
+        painter.setPen(QColor(_THEME["icon_color"]))
+        painter.drawText(QRectF(PADDING, 0, 22, HEADER_H),
+                         Qt.AlignVCenter | Qt.AlignLeft, self.icon())
+
+        # Header label (narrowed to leave room for the badge)
+        painter.setFont(_HEADER_FONT)
+        header_fg = _THEME[self._header_fg_key] if not selected else _THEME["header_fg"]
+        painter.setPen(QColor(header_fg))
+        painter.drawText(
+            QRectF(PADDING + 22, 0, NODE_WIDTH - PADDING * 2 - 22 - 16, HEADER_H),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            self.label(),
+        )
+
+        # Validation badge
+        self._draw_header_badge(painter)
+
+        # ── Search bar ────────────────────────────────────────────────────
+        sb_y = float(HEADER_H)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(_THEME["header_bg"]))
+        painter.drawRect(QRectF(0, sb_y, NODE_WIDTH, SEARCH_BAR_H))
+
+        # Separator lines (top and bottom of search bar)
+        painter.setPen(QPen(QColor(_THEME["body_border"]), 1))
+        painter.drawLine(QPointF(0, sb_y), QPointF(NODE_WIDTH, sb_y))
+        painter.drawLine(QPointF(0, sb_y + SEARCH_BAR_H),
+                         QPointF(NODE_WIDTH, sb_y + SEARCH_BAR_H))
+
+        # Magnifying-glass icon
+        painter.setFont(QFont("Segoe UI", 9))
+        painter.setPen(QColor(_THEME["icon_color"]))
+        painter.drawText(QRectF(PADDING, sb_y, 18, SEARCH_BAR_H),
+                         Qt.AlignVCenter | Qt.AlignLeft, "⌕")
+
+        # Filter text or greyed-out placeholder
+        painter.setFont(_LABEL_FONT)
+        if self._column_filter:
+            painter.setPen(QColor(_THEME["value_fg"]))
+            display_text = self._column_filter
+        else:
+            painter.setPen(QColor(_THEME["type_fg"]))
+            display_text = "Filtrar colunas..."
+        painter.drawText(
+            QRectF(PADDING + 20, sb_y, NODE_WIDTH - PADDING * 2 - 20, SEARCH_BAR_H),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            display_text,
+        )
+
+        # ── Column port type labels ───────────────────────────────────────
+        for port in self.out_ports:
+            if port.port_id == "out_ctx":
+                continue
+            lp = self._port_local(port)
+            # Column name (from port label, rendered right-of the port dot)
+            painter.setFont(_LABEL_FONT)
+            painter.setPen(QColor(_THEME["label_fg"]))
+            name_rect = QRectF(PORT_R + 4, lp.y() - ROW_H / 2,
+                               NODE_WIDTH - PORT_R - 4 - PADDING - 2, ROW_H)
+            painter.drawText(name_rect, Qt.AlignVCenter | Qt.AlignLeft, port.label)
+
+            # SQL type (greyed out, right-aligned)
+            if port.col_type:
+                painter.setPen(QColor(_THEME["type_fg"]))
+                type_rect = QRectF(PADDING, lp.y() - ROW_H / 2,
+                                   NODE_WIDTH - PADDING - PORT_R - 6, ROW_H)
+                fm = QFontMetrics(_LABEL_FONT)
+                painter.drawText(type_rect, Qt.AlignVCenter | Qt.AlignRight,
+                                 fm.elidedText(port.col_type, Qt.ElideRight,
+                                               int(type_rect.width() // 2)))
+
+        # ── "X of Y columns" indicator (only when filter is active) ──────
+        if self._column_filter and self._columns:
+            n_visible = len([p for p in self.out_ports if p.port_id != "out_ctx"])
+            n_total   = len(self._columns)
+            body_top  = HEADER_H + SEARCH_BAR_H + PADDING
+            ind_y = body_top + max(n_visible, 1) * ROW_H + PADDING / 4
+            painter.setFont(_LABEL_FONT)
+            painter.setPen(QColor(_THEME["type_fg"]))
+            painter.drawText(
+                QRectF(PADDING, ind_y, NODE_WIDTH - PADDING * 2, ROW_H),
+                Qt.AlignVCenter | Qt.AlignHCenter,
+                f"Mostrando {n_visible} de {n_total} colunas",
+            )
+
+        # Ports (glow handled inside _paint_ports)
+        self._paint_ports(painter)
+
+    # ── Mouse events ──────────────────────────────────────────────────────────
+    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
+        local = event.pos()
+        # Search bar area → open column-filter editor
+        if HEADER_H <= local.y() <= HEADER_H + SEARCH_BAR_H:
+            self._open_search_editor()
+            event.accept()
+            return
+        # Body below search bar → edit table name
+        if local.y() > HEADER_H + SEARCH_BAR_H:
+            self._open_name_editor()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _open_search_editor(self):
+        """Embed a QLineEdit inside the search bar for real-time column filtering."""
+        self.close_all_proxies()
+        le = QLineEdit()
+        le.setText(self._column_filter)
+        le.setPlaceholderText("Filtrar colunas...")
+        le.selectAll()
+
+        def _apply(text: str):
+            self._column_filter = text.strip()
+            self._rebuild_field_ports(self._column_filter)
+
+        def _commit():
+            _apply(le.text())
+            self.close_all_proxies()
+
+        le.textChanged.connect(_apply)
+        le.returnPressed.connect(_commit)
+        le.editingFinished.connect(lambda: (_commit() if self._proxies else None))
+        self._open_proxy(
+            le,
+            QRectF(PADDING + 18, HEADER_H + 2,
+                   NODE_WIDTH - PADDING * 2 - 18, SEARCH_BAR_H - 4),
+        )
+        le.setFocus()
+
+    def _open_name_editor(self):
+        self.close_all_proxies()
+        le = QLineEdit()
+        le.setText(self._data.get("name", ""))
+        le.setPlaceholderText("nome da tabela…")
+        le.selectAll()
+
+        def _commit():
+            text = le.text().strip()
+            if text:
+                self._data["name"] = text
+                self.node_changed.emit(self)
+                self.update()
+            self.close_all_proxies()
+
+        le.returnPressed.connect(_commit)
+        le.editingFinished.connect(lambda: (_commit() if self._proxies else None))
+        body_top = HEADER_H + SEARCH_BAR_H + PADDING
+        self._open_proxy(le, QRectF(PADDING, body_top, NODE_WIDTH - PADDING * 2, ROW_H))
+        le.setFocus()
+
+    # ── Serialisation ─────────────────────────────────────────────────────────
     def get_ast(self):
         return {
             "type":    "table",
@@ -470,37 +890,6 @@ class TableNode(BaseNode):
         self._selected_cols = data.get("selected_cols", [])
         if cols:
             self.set_schema_columns(cols)
-
-
-    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
-        """Double-click on body → inline-edit table name."""
-        local = event.pos()
-        if local.y() > HEADER_H:
-            self._open_name_editor()
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
-
-    def _open_name_editor(self):
-        self.close_all_proxies()
-        le = QLineEdit()
-        le.setText(self._data.get("name", ""))
-        le.setPlaceholderText("nome da tabela…")
-        le.selectAll()
-
-        def _commit():
-            text = le.text().strip()
-            if text:
-                self._data["name"] = text
-                self.node_changed.emit(self)
-                self.update()
-            self.close_all_proxies()
-
-        le.returnPressed.connect(_commit)
-        le.editingFinished.connect(lambda: (_commit() if self._proxies else None))
-        body_top = HEADER_H + PADDING
-        self._open_proxy(le, QRectF(PADDING, body_top, NODE_WIDTH - PADDING * 2, ROW_H))
-        le.setFocus()
 
 
 class JoinNode(BaseNode):
@@ -617,13 +1006,27 @@ class JoinNode(BaseNode):
         table_name = getattr(from_port.node, "_data", {}).get("name", "")
         qualified  = f"{table_name}.{col_name}" if table_name else col_name
 
+        # Resolve key flags from source node's column metadata
+        is_pk = False
+        is_fk = False
+        source_cols: list[dict] = getattr(from_port.node, "_columns", [])
+        for src_col in source_cols:
+            if src_col.get("name") == col_name:
+                is_pk = bool(src_col.get("pk", False))
+                is_fk = bool(src_col.get("fk", False))
+                break
+
         if port_id.startswith("in_left_"):
-            pairs[idx]["left_field"] = qualified
+            pairs[idx]["left_field"]  = qualified
+            pairs[idx]["left_is_pk"]  = is_pk
+            pairs[idx]["left_is_fk"]  = is_fk
             # Infere left_table do primeiro campo esq. se ainda não definida
             if table_name and not self._data.get("left_table"):
                 self._data["left_table"] = table_name
         else:
             pairs[idx]["right_field"] = qualified
+            pairs[idx]["right_is_pk"] = is_pk
+            pairs[idx]["right_is_fk"] = is_fk
             # right_table sempre é derivada dos campos dir.
             if table_name:
                 self._data["right_table"] = table_name
@@ -674,8 +1077,11 @@ class JoinNode(BaseNode):
 
         painter.setFont(_HEADER_FONT)
         painter.setPen(QColor(_THEME["header_fg"] if selected else _THEME[self._header_fg_key]))
-        painter.drawText(QRectF(PADDING + 22, 0, NODE_WIDTH - PADDING * 2 - 22, HEADER_H),
+        painter.drawText(QRectF(PADDING + 22, 0, NODE_WIDTH - PADDING * 2 - 22 - 16, HEADER_H),
                          Qt.AlignVCenter | Qt.AlignLeft, self.label())
+
+        # Validation badge
+        self._draw_header_badge(painter)
 
         # Pair cards (start right below header)
         pairs    = self._data.get("pairs", [])
@@ -704,29 +1110,70 @@ class JoinNode(BaseNode):
             painter.drawPath(rounded)
 
             rh = (self._CARD_H - self._CARD_PAD) / 2
+
+            # Key-icon widths (shown when the flag is set)
+            key_font = QFont("Segoe UI", 8)
+            km_left = QFontMetrics(key_font)
+            pk_icon_w = km_left.horizontalAdvance("🔑") + 2
+            fk_icon_w = km_left.horizontalAdvance("🔗") + 2
+
+            def _draw_field_row(lbl: str, is_pk: bool, is_fk: bool,
+                                row_x: float, row_y: float, row_w: float, row_h: float):
+                icon_x = row_x
+                if is_pk:
+                    painter.setFont(key_font)
+                    painter.setPen(QColor("#eab308"))   # gold
+                    painter.drawText(QRectF(icon_x, row_y, pk_icon_w, row_h),
+                                     Qt.AlignVCenter | Qt.AlignLeft, "🔑")
+                    icon_x += pk_icon_w
+                if is_fk:
+                    painter.setFont(key_font)
+                    painter.setPen(QColor("#60a5fa"))   # blue
+                    painter.drawText(QRectF(icon_x, row_y, fk_icon_w, row_h),
+                                     Qt.AlignVCenter | Qt.AlignLeft, "🔗")
+                    icon_x += fk_icon_w
+                avail = row_w - (icon_x - row_x)
+                painter.setFont(_LABEL_FONT)
+                painter.setPen(QColor(_THEME["value_fg"]))
+                painter.drawText(QRectF(icon_x, row_y, max(0.0, avail), row_h),
+                                 Qt.AlignVCenter | Qt.AlignLeft,
+                                 fm.elidedText(lbl, Qt.ElideRight, int(max(0.0, avail))))
+
+            text_x = PADDING + PORT_R + 6
             text_w = NODE_WIDTH - PADDING * 2 - op_w - PORT_R * 2 - 12
 
             # Left field (top sub-row)
-            painter.setFont(_LABEL_FONT)
-            painter.setPen(QColor(_THEME["value_fg"]))
-            lf_rect = QRectF(PADDING + PORT_R + 6, cy, text_w, rh)
-            painter.drawText(lf_rect, Qt.AlignVCenter | Qt.AlignLeft,
-                             fm.elidedText(lf, Qt.ElideRight, int(lf_rect.width())))
+            _draw_field_row(lf,
+                            pair.get("left_is_pk", False),
+                            pair.get("left_is_fk", False),
+                            text_x, cy, text_w, rh)
 
             # Right field (bottom sub-row)
-            rf_rect = QRectF(PADDING + PORT_R + 6, cy + rh, text_w, rh)
-            painter.drawText(rf_rect, Qt.AlignVCenter | Qt.AlignLeft,
-                             fm.elidedText(rf, Qt.ElideRight, int(rf_rect.width())))
+            _draw_field_row(rf,
+                            pair.get("right_is_pk", False),
+                            pair.get("right_is_fk", False),
+                            text_x, cy + rh, text_w, rh)
 
-            # Op badge (right of card, vertically centred)
+            # Op badge — styled as a dropdown (border + arrow)
             op_x    = NODE_WIDTH - PADDING - op_w
             op_rect = QRectF(op_x, cy + 4, op_w, self._CARD_H - self._CARD_PAD - 8)
-            painter.setPen(Qt.NoPen)
+            # Border + slight background
             painter.setBrush(QColor(_THEME["body_bg"]))
+            painter.setPen(QPen(op_color, 1))
             painter.drawRoundedRect(op_rect, 3, 3)
+            # Op text (left portion)
+            arrow_w  = 12
+            text_rect  = QRectF(op_rect.x() + 4, op_rect.y(),
+                                op_rect.width() - arrow_w - 4, op_rect.height())
+            arrow_rect = QRectF(op_rect.right() - arrow_w, op_rect.y(),
+                                arrow_w, op_rect.height())
             painter.setFont(QFont("Consolas", 8, QFont.Bold))
             painter.setPen(op_color)
-            painter.drawText(op_rect, Qt.AlignCenter, op)
+            painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, op)
+            # Dropdown chevron
+            painter.setFont(QFont("Segoe UI", 7))
+            painter.setPen(QColor(_THEME["label_fg"]))
+            painter.drawText(arrow_rect, Qt.AlignCenter, "▾")
 
         # Ports (uses _port_local for correct positions)
         self._paint_ports(painter)
@@ -828,6 +1275,27 @@ class JoinNode(BaseNode):
     def rows(self):
         return []   # paint() handles all visual rendering
 
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        for i, pair in enumerate(self._data.get("pairs", [])):
+            lf = pair.get("left_field", "")
+            rf = pair.get("right_field", "")
+            if bool(lf) != bool(rf):
+                missing = "esq." if rf and not lf else "dir."
+                errors.append(f"par {i + 1}: campo {missing} vazio")
+        return errors
+
+    def validate_warnings(self) -> list[str]:
+        if self._data.get("join_type") == "CROSS":
+            return []   # CROSS JOIN doesn't need an ON clause
+        has_pair = any(
+            p.get("left_field") and p.get("right_field")
+            for p in self._data.get("pairs", [])
+        )
+        if not has_pair:
+            return ["sem cláusula ON definida"]
+        return []
+
     def get_ast(self):
         """Return AST fragment; ASTBuilder reads this via to_dict()."""
         pairs = self._data.get("pairs", [])
@@ -904,6 +1372,7 @@ class SelectNode(BaseNode):
             "result_cols":  [],
             "w":            240,
             "h":            160,
+            "pinned":       False,     # 1.5 – pin: suppress auto-expand
         }
         self._available_columns: list[dict] = []
         self._result_dialog = None   # keep reference to prevent GC
@@ -914,6 +1383,17 @@ class SelectNode(BaseNode):
         self._resize_start:  QPointF = QPointF()
         self._resize_w0:     float   = 240.0
         self._resize_h0:     float   = 140.0
+
+        # 1.5 – virtual scroll
+        self._scroll_offset:   int = 0       # first visible data row index (vertical)
+        self._h_scroll_offset: int = 0       # first visible column index (horizontal)
+
+        # 1.6 – pulse animation
+        self._pulse_opacity: float = 0.0
+        self._pulse_step:    int   = 0     # direction: +1 fade-in, -1 fade-out
+        self._pulse_timer:   QTimer = QTimer()
+        self._pulse_timer.setInterval(16)  # ~60 fps
+        self._pulse_timer.timeout.connect(self._tick_pulse)
 
         _add_port(self, "in",  0, "in_ctx",  label="entrada", port_kind="context")
         _add_port(self, "out", 0, "out_ctx", label="saída",   port_kind="context")
@@ -927,19 +1407,32 @@ class SelectNode(BaseNode):
         pass  # available columns set externally via _available_columns
 
     def set_result(self, cols: list, rows: list):
+        # Auto-expand height only when not pinned
+        if cols and not self._data.get("pinned", False):
+            content_top = HEADER_H + self._FILTER_BAR_H + PADDING
+            field_rows_h = len(self._data.get("fields", [])) * ROW_H + PADDING
+            max_show = min(len(rows), 10) if rows else 1
+            min_h = content_top + field_rows_h + PADDING + 18 + max_show * 18 + PADDING
+            if self._data.get("h", 160) < min_h:
+                self._data["h"] = float(min_h)
+        self.prepareGeometryChange()
         self._data["result_cols"] = list(cols)
         self._data["result_rows"] = list(rows)
-        self.prepareGeometryChange()
+        self._scroll_offset   = 0   # reset scroll on new data
+        self._h_scroll_offset = 0
         self.update()
+        if self.scene():
+            self.scene().update(self.sceneBoundingRect())
 
     def rows(self):
-        result = [("distinct", "✓" if self._data.get("distinct") else "✗")]
-        qf = self._data.get("quick_filter", "nenhum")
-        if qf and qf != "nenhum":
-            result.append(("filtro", qf))
+        # distinct / filtro already shown in filter bar — only list explicit columns
+        result = []
         for f in self._data.get("fields", []):
             result.append(("col", f))
         return result
+
+    def validate(self) -> list[str]:
+        return []   # SELECT is always structurally valid
 
     def get_ast(self):
         return {
@@ -948,6 +1441,40 @@ class SelectNode(BaseNode):
             "distinct":     self._data.get("distinct", False),
             "quick_filter": self._data.get("quick_filter", "nenhum"),
         }
+
+    # ── Pulse animation helpers ────────────────────────────────────────────────
+    def _tick_pulse(self):
+        """Advance the pulse opacity by one frame (called by QTimer ~60 fps)."""
+        step = 0.08   # opacity delta per frame (300 ms / 16 ms ≈ 19 frames)
+        if self._pulse_step > 0:
+            self._pulse_opacity = min(1.0, self._pulse_opacity + step)
+            if self._pulse_opacity >= 1.0:
+                self._pulse_step = -1
+        else:
+            self._pulse_opacity = max(0.0, self._pulse_opacity - step)
+            if self._pulse_opacity <= 0.0:
+                self._pulse_timer.stop()
+                self._pulse_opacity = 0.0
+        self.update()
+
+    def _start_pulse(self):
+        self._pulse_opacity = 0.0
+        self._pulse_step    = 1
+        if not self._pulse_timer.isActive():
+            self._pulse_timer.start()
+
+    # ── Pin / scroll geometry helpers ─────────────────────────────────────────
+    def _pin_rect(self, w: float, result_top: float) -> QRectF:
+        """Small 16×16 clickable pin icon area inside the result panel."""
+        return QRectF(w - PADDING - 16, result_top + 2, 16, 16)
+
+    def _scrollbar_rect(self, w: float, table_top: float, table_h: float) -> QRectF:
+        """Thin 6-px vertical scrollbar on the right edge of the result area."""
+        return QRectF(w - PADDING - 6, table_top, 6, table_h)
+
+    def _h_scrollbar_rect(self, w: float, bottom: float) -> QRectF:
+        """Thin 6-px horizontal scrollbar along the bottom of the result area."""
+        return QRectF(PADDING, bottom - 8, w - PADDING * 2, 6)
 
     # ── Geometry ──────────────────────────────────────────────────────────────
     def _body_height(self) -> float:
@@ -1012,8 +1539,11 @@ class SelectNode(BaseNode):
         painter.setFont(_HEADER_FONT)
         header_fg = _THEME[self._header_fg_key] if not selected else _THEME["header_fg"]
         painter.setPen(QColor(header_fg))
-        painter.drawText(QRectF(PADDING + 22, 0, w - PADDING * 2 - 22, HEADER_H),
+        painter.drawText(QRectF(PADDING + 22, 0, w - PADDING * 2 - 22 - 16, HEADER_H),
                          Qt.AlignVCenter | Qt.AlignLeft, self.label())
+
+        # Validation badge
+        self._draw_header_badge(painter, w)
 
         # ── Filter bar (below header) ──────────────────────────────────────
         fb_y = HEADER_H
@@ -1027,12 +1557,25 @@ class SelectNode(BaseNode):
         painter.drawLine(QPointF(0, fb_y), QPointF(w, fb_y))
         painter.drawLine(QPointF(0, fb_y + fb_h), QPointF(w, fb_y + fb_h))
 
-        # Filter label
+        # Filter dropdown area — bordered box with chevron
         qf = self._data.get("quick_filter", "nenhum")
         qf_text = qf if qf != "nenhum" else "sem filtro"
+        dd_x = PADDING
+        dd_w = w - PADDING * 2 - self._RUN_BTN_W - 6
+        dd_rect = QRectF(dd_x, fb_y + 3, dd_w, fb_h - 6)
+        painter.setPen(QPen(QColor(_THEME["body_border"]), 1))
+        painter.setBrush(QColor(_THEME["body_bg"]))
+        painter.drawRoundedRect(dd_rect, 3, 3)
+        # Chevron on the right
+        chev_w = 16
+        painter.setFont(QFont("Segoe UI", 7))
+        painter.setPen(QColor(_THEME["label_fg"]))
+        painter.drawText(QRectF(dd_x + dd_w - chev_w, fb_y + 3, chev_w, fb_h - 6),
+                         Qt.AlignCenter, "▾")
+        # Label text
         painter.setFont(QFont("Segoe UI", 8))
         painter.setPen(QColor(_THEME["value_fg"]))
-        painter.drawText(QRectF(PADDING, fb_y, w - PADDING - self._RUN_BTN_W - 4, fb_h),
+        painter.drawText(QRectF(dd_x + 5, fb_y + 3, dd_w - chev_w - 6, fb_h - 6),
                          Qt.AlignVCenter | Qt.AlignLeft, qf_text)
 
         # ▶ Run button on the right of filter bar
@@ -1068,41 +1611,151 @@ class SelectNode(BaseNode):
         result_cols = self._data.get("result_cols", [])
         result_rows = self._data.get("result_rows", [])
         body_rows_h = self._content_top() + PADDING + len(self.rows()) * ROW_H + PADDING
-        if result_cols and h > body_rows_h + 20:
-            table_y = body_rows_h
-            max_data_rows = max(0, int((h - table_y - PADDING) // 18))
-            col_w = max(40, int((w - PADDING * 2) // max(len(result_cols), 1)))
+        pinned      = self._data.get("pinned", False)
 
-            # Header row
+        # Placeholder when no results yet
+        if not result_cols:
+            painter.setFont(QFont("Segoe UI", 8))
+            painter.setPen(QColor(_THEME["label_fg"]))
+            painter.drawText(
+                QRectF(PADDING, body_rows_h, w - PADDING * 2, h - body_rows_h - PADDING),
+                Qt.AlignTop | Qt.AlignHCenter,
+                "▶ execute para ver resultados",
+            )
+
+        if result_cols and h > body_rows_h + 20:
+            table_y   = body_rows_h
+            row_h_px  = 18
+            # Reserve 8px at bottom for horizontal scrollbar when needed
+            h_sb_reserve = 8
+            table_h   = h - table_y - PADDING - h_sb_reserve
+            # virtual scroll: how many data rows fit (excluding header row)
+            max_data_rows = max(0, int((table_h - row_h_px) // row_h_px))
+            total_rows    = len(result_rows)
+            total_cols    = len(result_cols)
+            # clamp scroll offsets
+            max_v_offset = max(0, total_rows - max_data_rows)
+            self._scroll_offset = max(0, min(self._scroll_offset, max_v_offset))
+            scroll_offset = self._scroll_offset
+
+            sb_w = 6   # vertical scrollbar width
+            has_v_sb = total_rows > max_data_rows and max_data_rows > 0
+
+            # Fixed column width — each col is MIN_COL_W wide so that horizontal
+            # scroll becomes useful when there are many columns
+            MIN_COL_W = 70
+            col_w     = MIN_COL_W
+            # How many columns fit in the visible area
+            v_sb_space = sb_w + 2 if has_v_sb else 0
+            visible_area_w = w - PADDING * 2 - v_sb_space
+            max_vis_cols   = max(1, int(visible_area_w // col_w))
+            max_h_offset   = max(0, total_cols - max_vis_cols)
+            self._h_scroll_offset = max(0, min(self._h_scroll_offset, max_h_offset))
+            h_scroll_offset = self._h_scroll_offset
+            has_h_sb = total_cols > max_vis_cols
+
+            visible_cols = result_cols[h_scroll_offset: h_scroll_offset + max_vis_cols]
+
+            col_area_w = w - PADDING * 2 - v_sb_space
+
+            # ── Pin button ────────────────────────────────────────────────
+            pin_rect = self._pin_rect(w, table_y)
+            painter.setFont(QFont("Segoe UI", 9))
+            painter.setPen(QColor(_THEME["label_fg"]))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawText(pin_rect, Qt.AlignCenter, "📌" if pinned else "⊙")
+
+            # ── Column header row ─────────────────────────────────────────
             painter.setFont(_VALUE_FONT)
             painter.setBrush(QColor(_THEME["header_bg"]))
             painter.setPen(Qt.NoPen)
-            painter.drawRect(QRectF(PADDING, table_y, w - PADDING * 2, 18))
+            painter.drawRect(QRectF(PADDING, table_y, col_area_w, row_h_px))
             painter.setPen(QColor(_THEME["label_fg"]))
-            for ci, col in enumerate(result_cols):
+            fm_v = QFontMetrics(_VALUE_FONT)
+            for ci, col in enumerate(visible_cols):
                 cx = PADDING + ci * col_w
-                fm = QFontMetrics(_VALUE_FONT)
-                painter.drawText(QRectF(cx + 2, table_y, col_w - 4, 18),
-                                 Qt.AlignVCenter | Qt.AlignLeft,
-                                 fm.elidedText(str(col), Qt.ElideRight, int(col_w - 4)))
+                painter.drawText(
+                    QRectF(cx + 2, table_y, col_w - 4, row_h_px),
+                    Qt.AlignVCenter | Qt.AlignLeft,
+                    fm_v.elidedText(str(col), Qt.ElideRight, int(col_w - 4)),
+                )
 
-            # Data rows
-            for ri, row in enumerate(result_rows[:max_data_rows]):
-                ry2 = table_y + 18 + ri * 18
-                bg = QColor(_THEME["body_bg"]) if ri % 2 == 0 else QColor(_THEME["body_bg"]).lighter(115)
+            # ── Data rows (virtual: only the visible slice) ───────────────
+            visible_rows = result_rows[scroll_offset: scroll_offset + max_data_rows]
+            for ri, row in enumerate(visible_rows):
+                ry2 = table_y + row_h_px + ri * row_h_px
+                bg = (QColor(_THEME["body_bg"]) if ri % 2 == 0
+                      else QColor(_THEME["body_bg"]).lighter(115))
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(bg)
-                painter.drawRect(QRectF(PADDING, ry2, w - PADDING * 2, 18))
+                painter.drawRect(QRectF(PADDING, ry2, col_area_w, row_h_px))
                 painter.setPen(QColor(_THEME["value_fg"]))
                 painter.setFont(_VALUE_FONT)
-                for ci, col in enumerate(result_cols):
+                for ci, col in enumerate(visible_cols):
                     cx = PADDING + ci * col_w
-                    cell_val = str(row.get(col, "")) if isinstance(row, dict) else (
-                        str(row[ci]) if ci < len(row) else "")
-                    fm = QFontMetrics(_VALUE_FONT)
-                    painter.drawText(QRectF(cx + 2, ry2, col_w - 4, 18),
-                                     Qt.AlignVCenter | Qt.AlignLeft,
-                                     fm.elidedText(cell_val, Qt.ElideRight, int(col_w - 4)))
+                    cell_val = (str(row.get(col, "")) if isinstance(row, dict)
+                                else (str(row[h_scroll_offset + ci])
+                                      if h_scroll_offset + ci < len(row) else ""))
+                    painter.drawText(
+                        QRectF(cx + 2, ry2, col_w - 4, row_h_px),
+                        Qt.AlignVCenter | Qt.AlignLeft,
+                        fm_v.elidedText(cell_val, Qt.ElideRight, int(col_w - 4)),
+                    )
+
+            # Zero-rows message
+            if not result_rows:
+                painter.setFont(QFont("Segoe UI", 8))
+                painter.setPen(QColor(_THEME["label_fg"]))
+                painter.drawText(
+                    QRectF(PADDING, table_y + row_h_px, col_area_w, 20),
+                    Qt.AlignVCenter | Qt.AlignHCenter,
+                    "0 linhas retornadas",
+                )
+
+            # ── Vertical scrollbar ────────────────────────────────────────
+            if has_v_sb:
+                sb_rect = self._scrollbar_rect(w, table_y + row_h_px,
+                                               table_h - row_h_px)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(_THEME["body_border"]))
+                painter.drawRoundedRect(sb_rect, 3, 3)
+                thumb_ratio = max_data_rows / total_rows
+                thumb_h     = max(12.0, sb_rect.height() * thumb_ratio)
+                thumb_top   = sb_rect.top() + (sb_rect.height() - thumb_h) * (
+                    scroll_offset / max(1, max_v_offset)
+                )
+                painter.setBrush(QColor(_THEME["sel_border"]))
+                painter.drawRoundedRect(
+                    QRectF(sb_rect.x(), thumb_top, sb_rect.width(), thumb_h), 3, 3
+                )
+
+            # ── Horizontal scrollbar ──────────────────────────────────────
+            if has_h_sb:
+                hb_rect = self._h_scrollbar_rect(w, table_y + table_h + row_h_px)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(_THEME["body_border"]))
+                painter.drawRoundedRect(hb_rect, 3, 3)
+                h_thumb_ratio = max_vis_cols / total_cols
+                h_thumb_w     = max(12.0, hb_rect.width() * h_thumb_ratio)
+                h_thumb_left  = hb_rect.left() + (hb_rect.width() - h_thumb_w) * (
+                    h_scroll_offset / max(1, max_h_offset)
+                )
+                painter.setBrush(QColor(_THEME["sel_border"]))
+                painter.drawRoundedRect(
+                    QRectF(h_thumb_left, hb_rect.y(), h_thumb_w, hb_rect.height()), 3, 3
+                )
+
+        # ── Pulse overlay on ▶ run button ─────────────────────────────────
+        if self._pulse_opacity > 0.0:
+            run_x    = w - self._RUN_BTN_W - 2
+            run_rect = QRectF(run_x, HEADER_H + 3, self._RUN_BTN_W - 2,
+                              self._FILTER_BAR_H - 6)
+            pulse_c  = QColor(255, 255, 255, int(self._pulse_opacity * 200))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(pulse_c)
+            pulse_path = QPainterPath()
+            pulse_path.addRoundedRect(run_rect, 3, 3)
+            painter.drawPath(pulse_path)
 
         # Ports
         self._paint_ports_for_width(painter, w)
@@ -1121,6 +1774,23 @@ class SelectNode(BaseNode):
             x = 0 if port.side == "in" else w
             y = self._content_top() + PADDING + port.row * ROW_H + ROW_H / 2
             local_pos = QPointF(x, y)
+
+            # ─ Drop-target ring ────────────────────────────────────────────
+            if port is self._drop_target_port:
+                ring = QColor("#22c55e")
+                ring.setAlphaF(0.9)
+                painter.setPen(QPen(ring, 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(local_pos, PORT_R + 5, PORT_R + 5)
+
+            # ─ Hover glow ─────────────────────────────────────────────────
+            if port is self._hovered_port:
+                glow = QColor(_THEME["port_conn"])
+                glow.setAlphaF(0.3)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(glow)
+                painter.drawEllipse(local_pos, PORT_R + 4, PORT_R + 4)
+
             fill = _THEME["port_conn"] if port.connected else _THEME["port_fill"]
             painter.setPen(QPen(QColor(_THEME["port_border"]), 1))
             painter.setBrush(QColor(fill) if fill != "transparent" else Qt.NoBrush)
@@ -1154,6 +1824,31 @@ class SelectNode(BaseNode):
                 return name
         return ""
 
+    def hoverMoveEvent(self, event):
+        local = event.pos()
+        handle = self._handle_at(local)
+        cursor_map = {
+            "br": Qt.SizeFDiagCursor,
+            "mr": Qt.SizeHorCursor,
+            "mb": Qt.SizeVerCursor,
+        }
+        if handle:
+            self.setCursor(cursor_map[handle])
+        else:
+            self.unsetCursor()
+            # Still process port hover glow via parent
+            new_port = self.port_at(local)
+            if new_port is not self._hovered_port:
+                self._hovered_port = new_port
+                self.update()
+
+    def hoverLeaveEvent(self, event):
+        self.unsetCursor()
+        if self._hovered_port is not None:
+            self._hovered_port = None
+            self.update()
+        super().hoverLeaveEvent(event)
+
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         local = event.pos()
         w = self._data.get("w", 240)
@@ -1162,9 +1857,22 @@ class SelectNode(BaseNode):
         fb_h = self._FILTER_BAR_H
         run_x = w - self._RUN_BTN_W - 2
         if (run_x <= local.x() <= w - 2 and fb_y <= local.y() <= fb_y + fb_h):
+            self._start_pulse()                 # 1.6 – pulse animation
             self.execute_requested.emit(self)
             event.accept()
             return
+        # Check pin button (only visible when results exist)
+        result_cols = self._data.get("result_cols", [])
+        if result_cols:
+            body_rows_h = self._content_top() + PADDING + len(self.rows()) * ROW_H + PADDING
+            h = self._data.get("h", 160)
+            if h > body_rows_h + 20:
+                pin_r = self._pin_rect(w, body_rows_h)
+                if pin_r.contains(local):
+                    self._data["pinned"] = not self._data.get("pinned", False)
+                    self.update()
+                    event.accept()
+                    return
         handle = self._handle_at(local)
         if handle and self.isSelected():
             self._resizing = True
@@ -1267,6 +1975,23 @@ class SelectNode(BaseNode):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def wheelEvent(self, event):
+        """Virtual scroll through result rows (vertical) or columns (Shift+wheel)."""
+        result_rows = self._data.get("result_rows", [])
+        result_cols = self._data.get("result_cols", [])
+        if not result_rows and not result_cols:
+            super().wheelEvent(event)
+            return
+        delta = -1 if event.delta() > 0 else 1
+        if event.modifiers() & Qt.ShiftModifier:
+            # Horizontal scroll
+            self._h_scroll_offset = max(0, self._h_scroll_offset + delta)
+        else:
+            # Vertical scroll
+            self._scroll_offset = max(0, self._scroll_offset + delta)
+        self.update()
+        event.accept()
 
     def _show_result_dialog(self):
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QLabel
@@ -1901,8 +2626,614 @@ class DeleteNode(BaseNode):
         }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# NoteNode  (Task 5.1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NOTE_BODY_FONT   = QFont("Segoe UI", 9)
+_NOTE_BODY_FONT.setItalic(True)
+
+_NOTE_MIN_W = 180
+_NOTE_MIN_H = 80
+_NOTE_HEADER_H = 22   # slimmer than SQL nodes — no validation badge
+
+
+class NoteNode(BaseNode):
+    """Sticky-note node for visual canvas comments.
+
+    • No SQL ports — does not participate in the query flow.
+    • Z-value sits above connections but below SQL nodes.
+    • Double-click opens a multi-line QTextEdit proxy.
+    • Resizable via bottom-right, right, and bottom handles (like SelectNode).
+    • Header uses a warm amber colour to be visually distinct from SQL nodes.
+    """
+
+    node_type = "note"
+
+    def __init__(self, node_id: str = "", parent=None):
+        super().__init__(node_id, parent)
+        self.node_type = "note"
+        self._data: dict = {
+            "text":  "",
+            "color": "#fef3c7",   # post-it yellow (can be overridden)
+            "w":     200.0,
+            "h":     120.0,
+        }
+        self._header_bg_key = "note_header_bg"
+        self._header_fg_key = "note_header_fg"
+
+        # Sits above connections (z=1) but below SQL nodes (default z=0 for QGraphicsObject)
+        self.setZValue(0.5)
+
+        # Resize state
+        self._resizing:      bool    = False
+        self._resize_corner: str     = ""
+        self._resize_start:  QPointF = QPointF()
+        self._resize_w0:     float   = 200.0
+        self._resize_h0:     float   = 120.0
+
+    # ── Abstract interface ────────────────────────────────────────────────────
+    def icon(self) -> str:   return "✎"
+    def label(self) -> str:  return "NOTA"
+    def rows(self) -> list:  return []
+
+    def validate(self) -> list[str]:
+        return []   # notes have no validation constraints
+
+    def get_ast(self) -> dict:
+        return {"type": "note"}   # no SQL contribution
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        return d   # _data already contains text/color/w/h
+
+    def load_from_dict(self, data: dict):
+        pass   # _data restored by node_from_dict caller
+
+    # ── Geometry ──────────────────────────────────────────────────────────────
+    def boundingRect(self) -> QRectF:
+        w = float(self._data.get("w", 200))
+        h = float(self._data.get("h", 120))
+        return QRectF(0, 0, max(w, _NOTE_MIN_W), max(h, _NOTE_MIN_H))
+
+    def _handle_br(self) -> QPointF:
+        r = self.boundingRect()
+        return QPointF(r.width(), r.height())
+
+    def _handle_mr(self) -> QPointF:
+        r = self.boundingRect()
+        return QPointF(r.width(), r.height() / 2)
+
+    def _handle_mb(self) -> QPointF:
+        r = self.boundingRect()
+        return QPointF(r.width() / 2, r.height())
+
+    def _handle_at(self, local: QPointF) -> str:
+        hit = 10
+        for name, pt in [("br", self._handle_br()),
+                          ("mr", self._handle_mr()),
+                          ("mb", self._handle_mb())]:
+            if (local - pt).manhattanLength() <= hit:
+                return name
+        return ""
+
+    # ── Paint ─────────────────────────────────────────────────────────────────
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
+              widget: QWidget = None):
+        rect   = self.boundingRect()
+        w      = rect.width()
+        h      = rect.height()
+        selected = self.isSelected()
+
+        # ── Shadow ────────────────────────────────────────────────────────
+        shadow = QPainterPath()
+        shadow.addRoundedRect(rect.adjusted(3, 3, 3, 3), 4, 4)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 50))
+        painter.drawPath(shadow)
+
+        # ── Body (post-it colour) ─────────────────────────────────────────
+        color_hex = self._data.get("color", "#fef3c7")
+        body_color = QColor(color_hex)
+        body_path = QPainterPath()
+        body_path.addRoundedRect(rect, 4, 4)
+        border_col = _THEME["sel_border"] if selected else _THEME["note_header_bg"]
+        painter.setPen(QPen(QColor(border_col), 2 if selected else 1))
+        painter.setBrush(body_color)
+        painter.drawPath(body_path)
+
+        # ── Header strip ──────────────────────────────────────────────────
+        hdr_rect = QRectF(0, 0, w, _NOTE_HEADER_H)
+        hdr_path = QPainterPath()
+        hdr_path.addRoundedRect(hdr_rect, 4, 4)
+        hdr_path.addRect(QRectF(0, _NOTE_HEADER_H / 2, w, _NOTE_HEADER_H / 2))
+        hdr_col = _THEME["sel_header"] if selected else _THEME["note_header_bg"]
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(hdr_col))
+        painter.drawPath(hdr_path)
+
+        # Header label (no validation badge, no icon)
+        painter.setFont(_HEADER_FONT)
+        painter.setPen(QColor(_THEME["note_header_fg"] if not selected
+                              else _THEME["header_fg"]))
+        painter.drawText(
+            QRectF(PADDING, 0, w - PADDING * 2, _NOTE_HEADER_H),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            self.label(),
+        )
+
+        # ── Body text ─────────────────────────────────────────────────────
+        text = self._data.get("text", "")
+        text_rect = QRectF(PADDING, _NOTE_HEADER_H + PADDING / 2,
+                           w - PADDING * 2, h - _NOTE_HEADER_H - PADDING)
+        painter.setFont(_NOTE_BODY_FONT)
+        painter.setPen(QColor(_THEME["note_body_fg"]))
+        if text:
+            painter.drawText(text_rect,
+                             Qt.AlignTop | Qt.AlignLeft | Qt.TextWordWrap,
+                             text)
+        else:
+            painter.setPen(QColor(_THEME["note_body_fg"] + "88"))   # 53 % opacity
+            painter.drawText(text_rect,
+                             Qt.AlignTop | Qt.AlignLeft | Qt.TextWordWrap,
+                             "Duplo-clique para editar…")
+
+        # ── Resize handles (when selected) ────────────────────────────────
+        if selected:
+            handle_color = QColor(_THEME["sel_border"])
+            painter.setPen(QPen(handle_color, 1))
+            painter.setBrush(handle_color)
+            for pt in (self._handle_br(), self._handle_mr(), self._handle_mb()):
+                painter.drawRect(QRectF(pt.x() - 4, pt.y() - 4, 8, 8))
+
+    # ── Mouse: resize ─────────────────────────────────────────────────────────
+    def hoverMoveEvent(self, event):
+        handle = self._handle_at(event.pos())
+        cursor_map = {
+            "br": Qt.SizeFDiagCursor,
+            "mr": Qt.SizeHorCursor,
+            "mb": Qt.SizeVerCursor,
+        }
+        if handle:
+            self.setCursor(cursor_map[handle])
+        else:
+            self.unsetCursor()
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self.unsetCursor()
+        super().hoverLeaveEvent(event)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
+        handle = self._handle_at(event.pos())
+        if handle and self.isSelected():
+            self._resizing = True
+            self._resize_corner = handle
+            self._resize_start  = event.pos()
+            r = self.boundingRect()
+            self._resize_w0 = r.width()
+            self._resize_h0 = r.height()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._resizing:
+            delta = event.pos() - self._resize_start
+            new_w = self._data.get("w", 200.0)
+            new_h = self._data.get("h", 120.0)
+            if self._resize_corner in ("br", "mr"):
+                new_w = max(float(_NOTE_MIN_W), self._resize_w0 + delta.x())
+            if self._resize_corner in ("br", "mb"):
+                new_h = max(float(_NOTE_MIN_H), self._resize_h0 + delta.y())
+            self.prepareGeometryChange()
+            self._data["w"] = new_w
+            self._data["h"] = new_h
+            self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._resizing:
+            self._resizing = False
+            self.node_changed.emit(self)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    # ── Double-click: open inline text editor ─────────────────────────────────
+    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
+        local = event.pos()
+        # Only open editor inside body area (below header)
+        if local.y() <= _NOTE_HEADER_H:
+            event.accept()
+            return
+        self._open_text_editor()
+        event.accept()
+
+    def _open_text_editor(self):
+        """Embed a QTextEdit proxy for multi-line note text editing."""
+        self.close_all_proxies()
+        r = self.boundingRect()
+        te = QTextEdit()
+        te.setPlainText(self._data.get("text", ""))
+        te.setFont(_NOTE_BODY_FONT)
+        te.setFrameShape(QTextEdit.NoFrame)
+        body_color = self._data.get("color", "#fef3c7")
+        te.setStyleSheet(
+            f"background: {body_color}; color: {_THEME['note_body_fg']}; padding: 0;"
+        )
+
+        def _commit():
+            text = te.toPlainText()
+            if text != self._data.get("text", ""):
+                self._data["text"] = text
+                self.node_changed.emit(self)
+                self.update()
+            self.close_all_proxies()
+
+        # Commit when editor loses focus
+        te.focusOutEvent_orig = te.focusOutEvent
+
+        def _focus_out(ev):
+            te.focusOutEvent_orig(ev)
+            if self._proxies:
+                _commit()
+
+        te.focusOutEvent = _focus_out
+
+        proxy_rect = QRectF(
+            PADDING,
+            _NOTE_HEADER_H + PADDING / 2,
+            r.width() - PADDING * 2,
+            r.height() - _NOTE_HEADER_H - PADDING,
+        )
+        self._open_proxy(te, proxy_rect)
+        te.setFocus()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GroupNode  (Task 5.2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_GROUP_MIN_W = 240
+_GROUP_MIN_H = 100
+_GROUP_HEADER_H = 28
+_GROUP_COLLAPSE_BTN_W = 20   # width of the ▶/▼ collapse toggle button area
+
+
+class GroupNode(BaseNode):
+    """Container that can collapse its child nodes into a single representative block.
+
+    Architecture
+    ─────────────
+    ``node_ids``   — list of node_id strings belonging to this group.
+
+    When *collapsed*:
+        • Children are hidden (``setVisible(False)``).
+        • The group's bounding box shrinks to a single compact rectangle.
+        • In/Out ports are mapped from the sub-graph's boundary ports.
+
+    When *expanded*:
+        • Children are shown again at their original positions.
+        • The group paints a translucent lasso-style background behind them.
+
+    The canvas (FlowCanvas) is responsible for:
+        • Keeping children's scene-pos in sync when the group is moved.
+        • Routing connections through the group ports when collapsed.
+
+    The double-click toggle is self-contained — it calls
+    ``_sync_children(scene)`` which looks up each node_id in the scene.
+
+    Serialisation
+    ─────────────
+    ``to_dict()`` stores ``node_ids`` and ``collapsed`` so the canvas can
+    restore the exact state.
+    """
+
+    node_type = "group"
+
+    def __init__(self, node_id: str = "", parent=None):
+        super().__init__(node_id, parent)
+        self.node_type = "group"
+        self._data: dict = {
+            "label":     "Grupo",
+            "node_ids":  [],   # list[str] of child node IDs
+            "collapsed": False,
+            "w":         300.0,
+            "h":         200.0,
+        }
+        self._header_bg_key = "group_header_bg"
+        self._header_fg_key = "group_header_fg"
+
+        # GroupNode sits below all SQL nodes so children render on top
+        self.setZValue(-1.0)
+
+        # Collapse/expand input/output context ports
+        _add_port(self, "in",  0, "grp_in",  label="in",  port_kind="context")
+        _add_port(self, "out", 0, "grp_out", label="out", port_kind="context")
+
+        # Resize state
+        self._resizing:      bool    = False
+        self._resize_corner: str     = ""
+        self._resize_start:  QPointF = QPointF()
+        self._resize_w0:     float   = 300.0
+        self._resize_h0:     float   = 200.0
+
+    # ── Abstract interface ────────────────────────────────────────────────────
+    def icon(self) -> str:   return "⬡"
+    def label(self) -> str:  return self._data.get("label", "Grupo")
+    def rows(self) -> list:
+        n = len(self._data.get("node_ids", []))
+        collapsed = self._data.get("collapsed", False)
+        return [
+            ("nós",    str(n)),
+            ("estado", "colapsado" if collapsed else "expandido"),
+        ]
+
+    def validate(self) -> list[str]:
+        return []
+
+    def get_ast(self) -> dict:
+        return {
+            "type":      "group",
+            "label":     self._data.get("label", ""),
+            "node_ids":  list(self._data.get("node_ids", [])),
+            "collapsed": self._data.get("collapsed", False),
+        }
+
+    def to_dict(self) -> dict:
+        return super().to_dict()   # _data already contains all needed fields
+
+    def load_from_dict(self, data: dict):
+        pass
+
+    # ── Child management ──────────────────────────────────────────────────────
+    def add_node_id(self, node_id: str) -> None:
+        ids: list[str] = self._data.setdefault("node_ids", [])
+        if node_id not in ids:
+            ids.append(node_id)
+            self.node_changed.emit(self)
+
+    def remove_node_id(self, node_id: str) -> None:
+        ids: list[str] = self._data.get("node_ids", [])
+        if node_id in ids:
+            ids.remove(node_id)
+            self.node_changed.emit(self)
+
+    def is_collapsed(self) -> bool:
+        return bool(self._data.get("collapsed", False))
+
+    # ── Expand / Collapse ─────────────────────────────────────────────────────
+    def toggle_collapse(self) -> None:
+        """Toggle between collapsed and expanded states.
+
+        Must be called with the QGraphicsScene available via ``self.scene()``.
+        """
+        scene = self.scene()
+        if scene is None:
+            return
+        collapsed = not self.is_collapsed()
+        self._data["collapsed"] = collapsed
+        self._sync_children(scene, visible=not collapsed)
+        self.prepareGeometryChange()
+        self.update()
+        self.node_changed.emit(self)
+
+    def _sync_children(self, scene, *, visible: bool) -> None:
+        """Show or hide all child nodes (and their connections) in *scene*."""
+        node_ids: set[str] = set(self._data.get("node_ids", []))
+        for item in scene.items():
+            if isinstance(item, BaseNode) and item.node_id in node_ids:
+                item.setVisible(visible)
+
+    # ── Geometry ──────────────────────────────────────────────────────────────
+    def boundingRect(self) -> QRectF:
+        if self.is_collapsed():
+            return QRectF(0, 0,
+                          max(float(_GROUP_MIN_W), NODE_WIDTH),
+                          float(_GROUP_HEADER_H + PADDING * 2 + ROW_H * 2))
+        w = float(self._data.get("w", 300))
+        h = float(self._data.get("h", 200))
+        return QRectF(0, 0, max(w, _GROUP_MIN_W), max(h, _GROUP_MIN_H))
+
+    def _handle_br(self) -> QPointF:
+        r = self.boundingRect()
+        return QPointF(r.width(), r.height())
+
+    def _handle_mr(self) -> QPointF:
+        r = self.boundingRect()
+        return QPointF(r.width(), r.height() / 2)
+
+    def _handle_mb(self) -> QPointF:
+        r = self.boundingRect()
+        return QPointF(r.width() / 2, r.height())
+
+    def _handle_at(self, local: QPointF) -> str:
+        if self.is_collapsed():
+            return ""   # no resize when collapsed
+        hit = 10
+        for name, pt in [("br", self._handle_br()),
+                          ("mr", self._handle_mr()),
+                          ("mb", self._handle_mb())]:
+            if (local - pt).manhattanLength() <= hit:
+                return name
+        return ""
+
+    def _collapse_btn_rect(self) -> QRectF:
+        """Rectangle for the ▶/▼ button on the right of the header."""
+        r = self.boundingRect()
+        return QRectF(r.width() - _GROUP_COLLAPSE_BTN_W - PADDING / 2,
+                      (float(_GROUP_HEADER_H) - 16) / 2,
+                      float(_GROUP_COLLAPSE_BTN_W), 16.0)
+
+    def _port_local(self, port: Port) -> QPointF:
+        r = self.boundingRect()
+        h = r.height()
+        if port.side == "in":
+            return QPointF(0, float(_GROUP_HEADER_H) + PADDING + ROW_H / 2)
+        return QPointF(r.width(), float(_GROUP_HEADER_H) + PADDING + ROW_H / 2)
+
+    # ── Paint ─────────────────────────────────────────────────────────────────
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
+              widget: QWidget = None):
+        rect     = self.boundingRect()
+        w        = rect.width()
+        h        = rect.height()
+        selected = self.isSelected()
+        collapsed = self.is_collapsed()
+
+        # ── Background ────────────────────────────────────────────────────
+        body_path = QPainterPath()
+        body_path.addRoundedRect(rect, 6, 6)
+        if collapsed:
+            body_bg = QColor(_THEME["group_body_bg"])
+        else:
+            body_bg = QColor(_THEME["group_body_bg"])
+            body_bg.setAlphaF(0.35)   # translucent lasso in expanded state
+        border_col = _THEME["sel_border"] if selected else _THEME["group_border"]
+        painter.setPen(QPen(QColor(border_col), 2 if selected else 1,
+                            Qt.SolidLine if collapsed else Qt.DashLine))
+        painter.setBrush(body_bg)
+        painter.drawPath(body_path)
+
+        # ── Header ────────────────────────────────────────────────────────
+        hdr_rect = QRectF(0, 0, w, float(_GROUP_HEADER_H))
+        hdr_path = QPainterPath()
+        hdr_path.addRoundedRect(hdr_rect, 6, 6)
+        hdr_path.addRect(QRectF(0, float(_GROUP_HEADER_H) / 2, w,
+                                float(_GROUP_HEADER_H) / 2))
+        hdr_col = _THEME["sel_header"] if selected else _THEME["group_header_bg"]
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(hdr_col))
+        painter.drawPath(hdr_path)
+
+        # Header icon
+        painter.setFont(_ICON_FONT)
+        painter.setPen(QColor(_THEME["icon_color"]))
+        painter.drawText(
+            QRectF(PADDING, 0, 22, float(_GROUP_HEADER_H)),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            self.icon(),
+        )
+
+        # Header label
+        painter.setFont(_HEADER_FONT)
+        painter.setPen(QColor(_THEME["group_header_fg"] if not selected
+                              else _THEME["header_fg"]))
+        btn_r = self._collapse_btn_rect()
+        label_w = btn_r.left() - PADDING - 22 - PADDING
+        painter.drawText(
+            QRectF(PADDING + 22, 0, label_w, float(_GROUP_HEADER_H)),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            self.label(),
+        )
+
+        # ▶/▼ collapse toggle button
+        painter.setFont(QFont("Segoe UI", 9))
+        painter.setPen(QColor(_THEME["group_header_fg"]))
+        painter.drawText(btn_r, Qt.AlignCenter,
+                         "▶" if collapsed else "▼")
+
+        # ── Body: show row info when collapsed, empty when expanded ───────
+        if collapsed:
+            y0 = float(_GROUP_HEADER_H) + PADDING
+            for i, (lbl, val) in enumerate(self.rows()):
+                ry = y0 + i * ROW_H
+                painter.setFont(_LABEL_FONT)
+                painter.setPen(QColor(_THEME["label_fg"]))
+                painter.drawText(QRectF(PADDING, ry, 80, ROW_H),
+                                 Qt.AlignVCenter | Qt.AlignLeft, str(lbl) + ":")
+                painter.setFont(_VALUE_FONT)
+                painter.setPen(QColor(_THEME["value_fg"]))
+                painter.drawText(QRectF(90, ry, w - 90 - PADDING, ROW_H),
+                                 Qt.AlignVCenter | Qt.AlignLeft, str(val))
+
+        # ── Ports ─────────────────────────────────────────────────────────
+        self._paint_ports(painter)
+
+        # ── Resize handles (expanded + selected) ──────────────────────────
+        if selected and not collapsed:
+            handle_color = QColor(_THEME["sel_border"])
+            painter.setPen(QPen(handle_color, 1))
+            painter.setBrush(handle_color)
+            for pt in (self._handle_br(), self._handle_mr(), self._handle_mb()):
+                painter.drawRect(QRectF(pt.x() - 4, pt.y() - 4, 8, 8))
+
+    # ── Mouse events ──────────────────────────────────────────────────────────
+    def hoverMoveEvent(self, event):
+        handle = self._handle_at(event.pos())
+        cursor_map = {
+            "br": Qt.SizeFDiagCursor,
+            "mr": Qt.SizeHorCursor,
+            "mb": Qt.SizeVerCursor,
+        }
+        if handle:
+            self.setCursor(cursor_map[handle])
+        else:
+            self.unsetCursor()
+        # Parent handles port hover
+        new_port = self.port_at(event.pos())
+        if new_port is not self._hovered_port:
+            self._hovered_port = new_port
+            self.update()
+
+    def hoverLeaveEvent(self, event):
+        self.unsetCursor()
+        super().hoverLeaveEvent(event)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
+        handle = self._handle_at(event.pos())
+        if handle and self.isSelected():
+            self._resizing = True
+            self._resize_corner = handle
+            self._resize_start  = event.pos()
+            r = self.boundingRect()
+            self._resize_w0 = r.width()
+            self._resize_h0 = r.height()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._resizing:
+            delta = event.pos() - self._resize_start
+            new_w = self._data.get("w", 300.0)
+            new_h = self._data.get("h", 200.0)
+            if self._resize_corner in ("br", "mr"):
+                new_w = max(float(_GROUP_MIN_W), self._resize_w0 + delta.x())
+            if self._resize_corner in ("br", "mb"):
+                new_h = max(float(_GROUP_MIN_H), self._resize_h0 + delta.y())
+            self.prepareGeometryChange()
+            self._data["w"] = new_w
+            self._data["h"] = new_h
+            self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._resizing:
+            self._resizing = False
+            self.node_changed.emit(self)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
+        local = event.pos()
+        # Header area → toggle collapse
+        if local.y() <= _GROUP_HEADER_H:
+            self.toggle_collapse()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 # ── Factory ───────────────────────────────────────────────────────────────────
-_NODE_REGISTRY: dict[str, type] = {    "table":     TableNode,
+_NODE_REGISTRY: dict[str, type] = {
+    "table":     TableNode,
     "join":      JoinNode,
     "select":    SelectNode,
     "where":     WhereNode,
@@ -1918,6 +3249,9 @@ _NODE_REGISTRY: dict[str, type] = {    "table":     TableNode,
     "union":     UnionNode,
     "update":    UpdateNode,
     "delete":    DeleteNode,
+    # New nodes (Tasks 5.1 / 5.2)
+    "note":      NoteNode,
+    "group":     GroupNode,
 }
 
 

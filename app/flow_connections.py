@@ -4,7 +4,7 @@ flow_connections.py — Bezier curve connections between node ports.
 """
 
 from PyQt5.QtCore import Qt, QRectF, QPointF
-from PyQt5.QtGui import QPainter, QPen, QColor, QPainterPath, QBrush
+from PyQt5.QtGui import QPainter, QPen, QColor, QPainterPath, QBrush, QFont
 from PyQt5.QtWidgets import (
     QGraphicsPathItem, QGraphicsItem, QStyleOptionGraphicsItem, QWidget,
 )
@@ -80,6 +80,47 @@ class FlowConnection(QGraphicsPathItem):
         ps.setWidth(12)
         return ps.createStroke(stroker)
 
+    # ── Label ─────────────────────────────────────────────────────────────────
+    def get_label(self) -> str:
+        """Return a short operator label to render on the edge, or '' if none."""
+        node_type = getattr(self.to_node, "node_type", "")
+
+        if node_type == "join":
+            port_id = self.to_port.port_id
+            if port_id.startswith("in_left_") or port_id.startswith("in_right_"):
+                try:
+                    idx = int(port_id.split("_")[-1])
+                except (ValueError, IndexError):
+                    return ""
+                pairs: list[dict] = self.to_node._data.get("pairs", [])
+                if idx < len(pairs):
+                    return pairs[idx].get("op", "=")
+
+        elif node_type == "where":
+            port_id = self.to_port.port_id
+            if port_id.startswith("in_field_") or port_id.startswith("in_value_"):
+                try:
+                    idx = int(port_id.split("_")[-1])
+                except (ValueError, IndexError):
+                    return ""
+                conditions: list[dict] = self.to_node._data.get("conditions", [])
+                if idx < len(conditions):
+                    return conditions[idx].get("op", "=")
+
+        return ""
+
+    def _bezier_midpoint(self) -> QPointF:
+        """Return the cubic Bezier midpoint (t=0.5) in local item coordinates."""
+        p1 = self.from_port.scene_pos()
+        p4 = self.to_port.scene_pos()
+        offset = self._ctrl_offset()
+        p2 = QPointF(p1.x() + offset, p1.y())
+        p3 = QPointF(p4.x() - offset, p4.y())
+        # B(0.5) = 0.125*P0 + 0.375*P1 + 0.375*P2 + 0.125*P3
+        mx = 0.125 * p1.x() + 0.375 * p2.x() + 0.375 * p3.x() + 0.125 * p4.x()
+        my = 0.125 * p1.y() + 0.375 * p2.y() + 0.375 * p3.y() + 0.125 * p4.y()
+        return self.mapFromScene(QPointF(mx, my))
+
     # ── Paint ─────────────────────────────────────────────────────────────────
     def _base_color(self) -> QColor:
         """Determine stroke color from port kind and destination node type."""
@@ -103,8 +144,9 @@ class FlowConnection(QGraphicsPathItem):
         color = self._base_color()
 
         if selected:
-            width = 2.0
-            style = Qt.DashLine
+            width = 3.0
+            style = Qt.SolidLine
+            color = QColor(_THEME["sel_border"])   # blue highlight
         elif self._hover:
             width = 2.0
             style = Qt.SolidLine
@@ -122,9 +164,30 @@ class FlowConnection(QGraphicsPathItem):
         painter.setPen(QPen(color, 1))
         painter.setBrush(QBrush(color))
         for pt in (self.from_port.scene_pos(), self.to_port.scene_pos()):
-            # Convert to local coords
             local = self.mapFromScene(pt)
             painter.drawEllipse(local, 3, 3)
+
+        # Edge label (operator badge)
+        label = self.get_label()
+        if label:
+            mid = self._bezier_midpoint()
+            font = QFont("Consolas", 7, QFont.Bold)
+            painter.setFont(font)
+            fm = painter.fontMetrics()
+            tw = fm.horizontalAdvance(label)
+            th = fm.height()
+            pad = 3
+            bg_rect = QRectF(
+                mid.x() - tw / 2 - pad,
+                mid.y() - th / 2 - pad,
+                tw + pad * 2,
+                th + pad * 2,
+            )
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(_THEME["body_bg"])))
+            painter.drawRoundedRect(bg_rect, 3.0, 3.0)
+            painter.setPen(QPen(QColor(_THEME["value_fg"])))
+            painter.drawText(bg_rect, Qt.AlignCenter, label)
 
     # ── Hover ─────────────────────────────────────────────────────────────────
     def hoverEnterEvent(self, event):
@@ -169,6 +232,7 @@ class TempConnection(QGraphicsPathItem):
         super().__init__(parent)
         self._start = start
         self._end   = start
+        self.is_valid: bool = True   # False → draw in red with ⛔ indicator
         self.setZValue(-1)
         self._refresh()
 
@@ -189,8 +253,15 @@ class TempConnection(QGraphicsPathItem):
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
               widget: QWidget = None):
-        pen = QPen(QColor("#3b82f6"), 1.5, Qt.DashLine)
+        color = QColor("#3b82f6") if self.is_valid else QColor("#ef4444")
+        pen = QPen(color, 1.5, Qt.DashLine)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(self.path())
+
+        # Draw ⛔ indicator near cursor when the connection is invalid
+        if not self.is_valid:
+            painter.setFont(QFont("Segoe UI", 11))
+            painter.setPen(QColor("#ef4444"))
+            painter.drawText(self._end + QPointF(10, -10), "\u26d4")

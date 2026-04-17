@@ -162,6 +162,20 @@ class MainWindow(QMainWindow):
         m_view.addSeparator()
         m_view.addAction(self._act("Tema Escuro", lambda: self._apply_theme("dark")))
         m_view.addAction(self._act("Tema Claro", lambda: self._apply_theme("light")))
+        m_view.addSeparator()
+        m_view.addAction(self._act("★ Orange Pulse", lambda: self._apply_theme("orange")))
+        m_view.addAction(self._act("★ Dracula Pro", lambda: self._apply_theme("dracula")))
+        m_view.addAction(self._act("★ Neon Cyber", lambda: self._apply_theme("neon")))
+        m_view.addAction(self._act("★ Blueprint Pro", lambda: self._apply_theme("blueprint")))
+        m_view.addAction(self._act("★ Data Stream", lambda: self._apply_theme("datastream")))
+        m_view.addAction(self._act("★ Neural Flow", lambda: self._apply_theme("neural")))
+        m_view.addAction(self._act("★ Matrix Core", lambda: self._apply_theme("matrix")))
+        m_view.addAction(self._act("★ Deep Space", lambda: self._apply_theme("deepspace")))
+        m_view.addAction(self._act("★ Synthwave X", lambda: self._apply_theme("synthwave")))
+        m_view.addAction(self._act("★ Lava / Inferno", lambda: self._apply_theme("lava")))
+        m_view.addAction(self._act("★ Industrial Metal", lambda: self._apply_theme("industrial")))
+        m_view.addAction(self._act("★ Frost UI", lambda: self._apply_theme("frost")))
+        m_view.addAction(self._act("★ Nature Tech", lambda: self._apply_theme("nature")))
 
         # Query menu
         m_query = menubar.addMenu("Consulta")
@@ -468,6 +482,11 @@ class MainWindow(QMainWindow):
                 widget._engine.dispose()
             except Exception:
                 pass
+        if isinstance(widget, FlowBuilderTab) and getattr(widget, "_owns_engine", False):
+            try:
+                widget._engine.dispose()
+            except Exception:
+                pass
         self._tabs.removeTab(index)
         if self._tabs.count() == 0:
             self._add_welcome_tab()
@@ -590,6 +609,13 @@ class MainWindow(QMainWindow):
         conn_name = exp_conn or self._current_conn_name()
         db_name   = exp_db  or self._cmb_databases.currentText()
         engine    = self._conn_manager.get_connection(conn_name)
+        tab_owns_engine = False
+        if engine is not None and db_name:
+            from core.schema_loader import SchemaLoader
+            db_engine = SchemaLoader._engine_for_db(engine, db_name)
+            if db_engine is not None:
+                engine = db_engine
+                tab_owns_engine = True
         cfg       = self._conn_manager.get_config(conn_name) or {}
         # Detect dialect from driver type
         db_type   = cfg.get("type", "postgresql").lower()
@@ -609,6 +635,7 @@ class MainWindow(QMainWindow):
             dialect   = dialect,
             parent    = self,
         )
+        flow_tab._owns_engine = tab_owns_engine
         flow_tab.set_theme(self._current_theme)
         flow_tab.open_sql_in_editor.connect(self._new_query_tab)
         flow_tab.execute_sql.connect(self._run_sql_on_current_connection)
@@ -699,11 +726,20 @@ class MainWindow(QMainWindow):
             self._history_dock.show()
 
     def _update_current_tab_engine(self):
-        tab = self._current_editor_tab()
-        if tab:
-            conn = self._current_conn_name()
-            db = self._cmb_databases.currentText()
-            engine = self._conn_manager.get_connection(conn)
+        tab = self._tabs.currentWidget()
+        conn = self._current_conn_name()
+        db = self._cmb_databases.currentText()
+        engine = self._conn_manager.get_connection(conn)
+
+        if engine is not None and db:
+            from core.schema_loader import SchemaLoader
+            db_engine = SchemaLoader._engine_for_db(engine, db)
+            if db_engine is not None:
+                engine = db_engine
+
+        if isinstance(tab, SqlEditorTab):
+            tab.set_engine(engine, conn, db)
+        elif isinstance(tab, FlowBuilderTab):
             tab.set_engine(engine, conn, db)
 
     def _load_databases_for(self, conn_name: str):

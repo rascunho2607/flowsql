@@ -10,19 +10,52 @@ Provides:
   • Minimum 1 tab: close button is disabled (hidden) when only one tab remains
 """
 
+import json
+import os
 import re
+import tempfile
 
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QEvent, QObject, QTimer, QPoint
 from PyQt5.QtGui  import QFont
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabBar,
     QPushButton, QLineEdit, QSizePolicy, QApplication,
+    QMenu, QToolTip, QFileDialog,
 )
 
 from app.flow_builder_tab import FlowBuilderTab
 
-_TAB_FONT  = QFont("Segoe UI", 9)
-_CLOSE_W   = 20   # width of each × close button
+_TAB_FONT      = QFont("Segoe UI", 9)
+_CLOSE_W       = 20   # width of each × close button
+_SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
+
+
+class _TabBarFilter(QObject):
+    """Event filter on QTabBar for context menus and rich tooltips."""
+
+    def __init__(self, manager: "FlowTabManager") -> None:
+        super().__init__(manager)
+        self._mgr = manager
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is not self._mgr._tab_bar:
+            return super().eventFilter(obj, event)
+
+        t = event.type()
+
+        if t == QEvent.ContextMenu:
+            idx = self._mgr._tab_bar.tabAt(event.pos())
+            if idx >= 0:
+                self._mgr._show_tab_context_menu(idx, event.globalPos())
+            return True
+
+        if t == QEvent.ToolTip:
+            idx = self._mgr._tab_bar.tabAt(event.pos())
+            if idx >= 0:
+                self._mgr._show_tab_tooltip(idx, event.globalPos())
+                return True
+
+        return super().eventFilter(obj, event)
 
 
 class FlowTabManager(QWidget):
@@ -47,10 +80,18 @@ class FlowTabManager(QWidget):
         self._dialect   = dialect
 
         self._count = 0                        # monotonically increasing tab counter
-        self._dirty: dict[int, bool] = {}      # index → dirty flag
+        self._dirty: dict[int, bool]     = {}  # index → dirty flag
         self._base_names: dict[int, str] = {}  # index → clean name (without " ●")
+        self._executing: dict[int, bool] = {}  # index → spinner active
+        self._sql_cache: dict[int, str]  = {}  # index → cached generated SQL
         self._rename_edit: QLineEdit | None = None   # inline rename editor
         self._rename_idx:  int             = -1
+
+        # Spinner state
+        self._spinner_frame = 0
+        self._spinner_timer = QTimer(self)
+        self._spinner_timer.setInterval(200)
+        self._spinner_timer.timeout.connect(self._tick_spinner)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -67,10 +108,15 @@ class FlowTabManager(QWidget):
         self._tab_bar.setObjectName("flow_tab_bar")
         self._tab_bar.setFont(_TAB_FONT)
         self._tab_bar.setExpanding(False)
-        self._tab_bar.setMovable(False)
+        self._tab_bar.setMovable(True)
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
         self._tab_bar.tabBarDoubleClicked.connect(self._start_rename)
+        self._tab_bar.tabMoved.connect(self._on_tab_moved)
         tab_row_lo.addWidget(self._tab_bar, 1)
+
+        # Install event filter for context menu and rich tooltips
+        self._tab_filter = _TabBarFilter(self)
+        self._tab_bar.installEventFilter(self._tab_filter)
 
         btn_add = QPushButton("+")
         btn_add.setObjectName("flow_tab_add_btn")
@@ -110,6 +156,12 @@ class FlowTabManager(QWidget):
         # Track dirty state
         idx = self._tab_bar.count()
         tab.flow_changed.connect(lambda _idx=idx: self._mark_dirty(_idx))
+
+        # Spinner: start when this tab's SQL is executed
+        tab.execute_sql.connect(lambda _sql, _idx=idx: self._start_spinner(_idx))
+
+        # SQL cache: invalidate when this tab changes
+        tab.flow_changed.connect(lambda _idx=idx: self._sql_cache.pop(_idx, None))
 
         self._stack.addWidget(tab)
 
@@ -165,14 +217,22 @@ class FlowTabManager(QWidget):
         self._update_close_buttons()
 
     def _rebuild_index_maps(self):
-        """Re-index _dirty and _base_names after a tab removal."""
+        """Re-index _dirty, _base_names, _executing and _sql_cache after a tab change."""
         new_dirty: dict[int, bool] = {}
         new_names: dict[int, str]  = {}
+        new_exec:  dict[int, bool] = {}
+        new_cache: dict[int, str]  = {}
         for i in range(self._tab_bar.count()):
             new_dirty[i] = self._dirty.get(i, False)
-            new_names[i] = self._base_names.get(i, self._tab_bar.tabText(i).rstrip(" ●").strip())
+            new_names[i] = self._base_names.get(
+                i, self._tab_bar.tabText(i).rstrip(" ●").strip()
+            )
+            new_exec[i]  = self._executing.get(i, False)
+            new_cache[i] = self._sql_cache.get(i, "")
         self._dirty      = new_dirty
         self._base_names = new_names
+        self._executing  = new_exec
+        self._sql_cache  = new_cache
 
     def _update_close_buttons(self):
         """Show/hide close buttons — hidden when only 1 tab remains."""
@@ -185,6 +245,13 @@ class FlowTabManager(QWidget):
     # ── Tab switching ─────────────────────────────────────────────────────────
     def _on_tab_changed(self, idx: int):
         self._stack.setCurrentIndex(idx)
+
+    def _on_tab_moved(self, from_idx: int, to_idx: int):
+        """Keep QStackedWidget in sync when the user drags a tab to a new position."""
+        widget = self._stack.widget(from_idx)
+        self._stack.removeWidget(widget)
+        self._stack.insertWidget(to_idx, widget)
+        self._rebuild_index_maps()
 
     # ── Inline rename ─────────────────────────────────────────────────────────
     def _start_rename(self, idx: int):
@@ -241,3 +308,177 @@ class FlowTabManager(QWidget):
         self._dirty[idx] = False
         base = self._base_names.get(idx, self._tab_bar.tabText(idx).replace(" ●", "").strip())
         self._tab_bar.setTabText(idx, base)
+
+    # ── Execution spinner (Task 4.3) ──────────────────────────────────────────
+
+    def _start_spinner(self, idx: int) -> None:
+        """Begin animating the spinner on tab `idx`."""
+        if idx >= self._tab_bar.count():
+            return
+        self._executing[idx] = True
+        if not self._spinner_timer.isActive():
+            self._spinner_timer.start()
+
+    def stop_spinner(self, idx: int) -> None:
+        """Stop the spinner on tab `idx` (call when execution finishes)."""
+        if idx >= self._tab_bar.count():
+            return
+        self._executing[idx] = False
+        # If no tabs are still executing, stop the timer
+        if not any(self._executing.values()):
+            self._spinner_timer.stop()
+        # Restore the tab label
+        base  = self._base_names.get(idx, f"Flow {idx + 1}")
+        dirty = self._dirty.get(idx, False)
+        self._tab_bar.setTabText(idx, base + (" ●" if dirty else ""))
+
+    def _tick_spinner(self) -> None:
+        self._spinner_frame = (self._spinner_frame + 1) % len(_SPINNER_FRAMES)
+        frame = _SPINNER_FRAMES[self._spinner_frame]
+        for idx, active in self._executing.items():
+            if active and idx < self._tab_bar.count():
+                base  = self._base_names.get(idx, f"Flow {idx + 1}")
+                dirty = self._dirty.get(idx, False)
+                self._tab_bar.setTabText(idx, f"{frame} {base}" + (" ●" if dirty else ""))
+
+    # ── Context menu on tabs (Task 4.2) ───────────────────────────────────────
+
+    def _show_tab_context_menu(self, idx: int, global_pos: QPoint) -> None:
+        menu = QMenu(self)
+        count = self._tab_bar.count()
+
+        act_close        = menu.addAction("Fechar")
+        act_close.setEnabled(count > 1)
+        act_close_others = menu.addAction("Fechar Outros")
+        act_close_others.setEnabled(count > 1)
+        act_close_right  = menu.addAction("Fechar Todos à Direita")
+        act_close_right.setEnabled(idx < count - 1)
+        act_rename       = menu.addAction("Renomear\tF2")
+        act_dup          = menu.addAction("Duplicar Flow")
+        menu.addSeparator()
+        act_export = menu.addAction("Exportar Flow...")
+
+        chosen = menu.exec_(global_pos)
+        if chosen is None:
+            return
+        if chosen is act_close:
+            self._close_tab(idx)
+        elif chosen is act_close_others:
+            self._close_others(idx)
+        elif chosen is act_close_right:
+            self._close_right(idx)
+        elif chosen is act_rename:
+            self._start_rename(idx)
+        elif chosen is act_dup:
+            self.duplicate_flow(idx)
+        elif chosen is act_export:
+            self._export_flow(idx)
+
+    def _close_others(self, keep_idx: int) -> None:
+        """Close all tabs except the one at keep_idx."""
+        # Close tabs to the right first (indices stay stable)
+        while self._tab_bar.count() > keep_idx + 1:
+            self._close_tab(self._tab_bar.count() - 1)
+        # Close tabs to the left (keep_idx slides down)
+        while keep_idx > 0 and self._tab_bar.count() > 1:
+            self._close_tab(0)
+            keep_idx -= 1
+
+    def _close_right(self, from_idx: int) -> None:
+        """Close every tab to the right of from_idx."""
+        while self._tab_bar.count() > from_idx + 1:
+            self._close_tab(self._tab_bar.count() - 1)
+
+    def _export_flow(self, idx: int) -> None:
+        page = self._stack.widget(idx)
+        if not isinstance(page, FlowBuilderTab):
+            return
+        canvas = page._canvas
+        data = {
+            "version": "1.0",
+            "nodes":       [n.to_dict() for n in canvas._nodes],
+            "connections": [c.to_dict() for c in canvas._connections],
+        }
+        base_name = self._base_names.get(idx, f"Flow {idx + 1}")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Flow", f"{base_name}.json", "JSON (*.json)"
+        )
+        if path:
+            from pathlib import Path
+            Path(path).write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+
+    # ── Rich tooltip on tabs (Task 4.4) ───────────────────────────────────────
+
+    def _show_tab_tooltip(self, idx: int, global_pos: QPoint) -> None:
+        page = self._stack.widget(idx)
+        if not isinstance(page, FlowBuilderTab):
+            return
+        canvas    = page._canvas
+        n_nodes   = len(canvas._nodes)
+        n_conns   = len(canvas._connections)
+        base_name = self._base_names.get(idx, f"Flow {idx + 1}")
+
+        # Use cached SQL; regenerate when cache is empty
+        sql = self._sql_cache.get(idx, "")
+        if not sql and n_nodes > 0:
+            try:
+                sql = canvas.generate_sql(getattr(page, "_dialect", "postgresql"))
+                self._sql_cache[idx] = sql
+            except Exception:
+                sql = ""
+
+        if sql and not sql.startswith("--"):
+            preview = sql[:120].replace("\n", " ").strip()
+            if len(sql) > 120:
+                preview += "…"
+            valid_icon = "✅ Válido"
+        else:
+            preview    = ""
+            valid_icon = "⚠️ Vazio" if n_nodes == 0 else "⚠️ Erro"
+
+        tip_lines = [
+            f"<b>Flow: {base_name}</b>",
+            f"📊 {n_nodes} nós | 🔗 {n_conns} conexões",
+            valid_icon,
+        ]
+        if preview:
+            tip_lines.append(f"<code>{preview}</code>")
+
+        QToolTip.showText(global_pos, "<br>".join(tip_lines), self._tab_bar)
+
+    # ── Duplicate flow (Task 4.5) ──────────────────────────────────────────────
+
+    def duplicate_flow(self, idx: int) -> "FlowBuilderTab | None":
+        """Create a copy of the flow at `idx` and open it in a new tab."""
+        page = self._stack.widget(idx)
+        if not isinstance(page, FlowBuilderTab):
+            return None
+
+        canvas    = page._canvas
+        base_name = self._base_names.get(idx, f"Flow {idx + 1}")
+
+        # Serialise the original canvas in memory via a temp file
+        data = {
+            "version": "1.0",
+            "nodes":       [n.to_dict() for n in canvas._nodes],
+            "connections": [c.to_dict() for c in canvas._connections],
+        }
+        new_tab = self.add_flow(f"{base_name} (cópia)")
+
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            new_tab._canvas.load_from_json(tmp_path)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        # Mark the copy as dirty (unsaved)
+        new_idx = self._tab_bar.currentIndex()
+        self._mark_dirty(new_idx)
+        return new_tab

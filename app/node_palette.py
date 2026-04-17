@@ -43,6 +43,10 @@ _GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("update",    "✎  UPDATE"),
         ("delete",    "✕  DELETE"),
     ]),
+    ("Organização", [
+        ("note",      "✎  Nota / Sticky"),
+        ("group",     "⬡  Grupo"),
+    ]),
 ]
 
 _TITLE_FONT = QFont("Segoe UI", 9, QFont.Bold)
